@@ -13,8 +13,9 @@ from telethon.tl import types
 
 from .config import Config
 from .database import Database
-from .file_service import (copy_to_part, make_item, make_profile_item, media_kind,
-                           part_path, photo_download_spec, remove_file, valid_file)
+from .file_service import (copy_to_part, enriched_for_original, make_item, make_profile_item,
+                           media_kind, part_path, photo_download_spec, remove_empty_directory,
+                           remove_file, valid_file)
 from .metadata_service import MetadataService
 from .models import Channel, DownloadError, MediaItem, MetadataError, Status, Summary, UnsupportedMetadata
 from .telegram_service import TelegramService
@@ -78,12 +79,13 @@ class DownloadService:
             candidate = item.original_path.with_name(f"{item.original_path.stem}_media-{item.file_id}_{index}{item.original_path.suffix}")
         if candidate != item.original_path:
             item = replace(item, original_path=candidate,
-                           enriched_path=candidate.parent.parent / "enriched" / candidate.name)
+                           enriched_path=enriched_for_original(candidate))
         row = await self.database.upsert_media(item)
         item = replace(
             item, original_path=Path(row["original_path"]), enriched_path=Path(row["enriched_path"]),
             download_date=datetime.fromisoformat(row["download_date_utc"].replace("Z", "+00:00")),
         )
+        item = await self._recover_flat_original(item, row)
         original_ok = valid_file(item.original_path, row["actual_size"], row["original_sha256"])
         if not original_ok and item.original_path.is_file() and not row["original_sha256"]:
             size = item.original_path.stat().st_size
@@ -121,10 +123,17 @@ class DownloadService:
         else:
             self.logger.info("Original verified: %s", item.key)
         row = await self.database.get_media(item.channel_id, item.key)
-        if row["enriched_status"] == Status.UNSUPPORTED_METADATA:
+        has_metadata, no_metadata_reason = await self.metadata.has_embedded_metadata(item.original_path, item)
+        if not has_metadata:
+            remove_file(item.enriched_path)
+            remove_file(part_path(item.enriched_path))
+            item = await self._flatten_original(item, row)
+            remove_empty_directory(item.enriched_path.parent)
+            await self.database.mark_metadata_unavailable(item, no_metadata_reason)
             summary.unsupported_metadata_files += 1
             if original_was_valid:
                 summary.skipped_valid_files += 1
+            self.logger.warning("Embedded metadata unavailable for %s: %s", item.key, no_metadata_reason)
             return
         if valid_file(item.enriched_path, None, row["enriched_sha256"]):
             if row["enriched_status"] != Status.COMPLETE:
@@ -140,6 +149,47 @@ class DownloadService:
         await self._enrich(item, summary)
         if had_corrupted_copy and summary.created_enriched_copies > prior_created:
             summary.repaired_corrupted_files += 1
+
+    async def _recover_flat_original(self, item: MediaItem, row: object) -> MediaItem:
+        legacy = item.original_path
+        if legacy.parent.name != "original" or legacy.exists() or not row["original_sha256"]:
+            return item
+        parent = legacy.parent.parent
+        if not parent.is_dir():
+            return item
+        for candidate in parent.iterdir():
+            if (candidate.is_file() and not candidate.is_symlink() and candidate.suffix == legacy.suffix
+                    and candidate.stem.startswith(legacy.stem)
+                    and not await self.database.path_in_use(candidate, item.key)
+                    and valid_file(candidate, row["actual_size"], row["original_sha256"])):
+                enriched = enriched_for_original(candidate)
+                await self.database.update_paths(item, candidate, enriched)
+                remove_empty_directory(legacy.parent)
+                return replace(item, original_path=candidate, enriched_path=enriched)
+        return item
+
+    async def _flatten_original(self, item: MediaItem, row: object) -> MediaItem:
+        legacy = item.original_path
+        if legacy.parent.name != "original":
+            return item
+        parent = legacy.parent.parent
+        candidate = parent / legacy.name
+        index = 1
+        while (await self.database.path_in_use(candidate, item.key)
+               or candidate.is_symlink()
+               or part_path(candidate).exists()
+               or (candidate.exists() and not valid_file(candidate, row["actual_size"], row["original_sha256"]))):
+            index += 1
+            candidate = parent / f"{legacy.stem}_media-{item.file_id}_{index}{legacy.suffix}"
+        if legacy.exists():
+            if candidate.exists():
+                remove_file(legacy)
+            else:
+                os.replace(legacy, candidate)
+        enriched = enriched_for_original(candidate)
+        await self.database.update_paths(item, candidate, enriched)
+        remove_empty_directory(legacy.parent)
+        return replace(item, original_path=candidate, enriched_path=enriched)
 
     async def _download_original(self, item: MediaItem, source: types.Message | types.Channel,
                                  row: object, summary: Summary) -> None:
@@ -228,6 +278,7 @@ class DownloadService:
         except UnsupportedMetadata as exc:
             if temporary is not None:
                 remove_file(temporary)
+            remove_empty_directory(item.enriched_path.parent)
             await self.database.set_state(item, enriched=Status.UNSUPPORTED_METADATA, error=str(exc))
             summary.unsupported_metadata_files += 1
             self.logger.warning("Metadata unsupported for %s: %s", item.key, exc)
@@ -236,6 +287,7 @@ class DownloadService:
                 raise
             if temporary is not None:
                 remove_file(temporary)
+            remove_empty_directory(item.enriched_path.parent)
             reason = f"Enrichment failed ({type(exc).__name__})."
             await self.database.set_state(item, enriched=Status.FAILED, error=reason)
             summary.failed_files += 1

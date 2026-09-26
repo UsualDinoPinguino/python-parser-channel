@@ -40,6 +40,31 @@ def same_utc(value: str, expected: str) -> bool:
 
 
 class MetadataService:
+    async def has_embedded_metadata(self, path: Path, item: MediaItem) -> tuple[bool, str]:
+        extension = item.original_path.suffix.lower()
+        if extension in IMAGE_FORMATS:
+            if not shutil.which("exiftool"):
+                return False, "ExifTool is unavailable."
+            try:
+                tags = await self._image_tags(path)
+            except MetadataError:
+                return False, "ExifTool could not read embedded metadata."
+            meaningful = any(key.startswith(("EXIF:", "IFD0:", "IFD1:", "ExifIFD:",
+                                             "GPS:", "InteropIFD:", "MakerNotes:", "XMP-", "IPTC:"))
+                             for key in tags)
+            return meaningful, "" if meaningful else "No embedded image metadata was found."
+        if extension in STREAM_FORMATS:
+            if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+                return False, "FFmpeg or FFprobe is unavailable."
+            try:
+                tags = await self._stream_tags(path)
+            except MetadataError:
+                return False, "FFprobe could not read embedded metadata."
+            technical = {"encoder", "major_brand", "minor_version", "compatible_brands"}
+            meaningful = any(key not in technical for key in tags)
+            return meaningful, "" if meaningful else "No embedded stream metadata was found."
+        return False, "No verified metadata reader is available for this format."
+
     async def enrich(self, temporary: Path, item: MediaItem) -> None:
         extension = item.original_path.suffix.lower()
         if extension in IMAGE_FORMATS:

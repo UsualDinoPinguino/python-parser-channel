@@ -4,6 +4,7 @@ from pathlib import Path
 
 import aiosqlite
 
+from .file_service import enriched_for_original
 from .models import Channel, MediaItem, Status
 from .utils import iso_utc
 
@@ -153,12 +154,19 @@ class Database:
         return row
 
     async def path_in_use(self, path: Path, key: str) -> bool:
-        enriched = path.parent.parent / "enriched" / path.name
+        enriched = enriched_for_original(path)
         async with self.db.execute(
             "SELECT 1 FROM media WHERE (original_path=? OR enriched_path=?) AND media_key<>? LIMIT 1",
             (str(path), str(enriched), key),
         ) as cursor:
             return await cursor.fetchone() is not None
+
+    async def update_paths(self, item: MediaItem, original: Path, enriched: Path) -> None:
+        await self.db.execute(
+            "UPDATE media SET original_path=?, enriched_path=? WHERE channel_id=? AND media_key=?",
+            (str(original), str(enriched), item.channel_id, item.key),
+        )
+        await self.db.commit()
 
     async def set_state(self, item: MediaItem, *, original: Status | None = None,
                         enriched: Status | None = None, downloaded_bytes: int | None = None,
@@ -197,5 +205,13 @@ class Database:
         await self.db.execute(
             "UPDATE media SET enriched_status='pending', enriched_sha256=NULL WHERE channel_id=? AND media_key=?",
             (item.channel_id, item.key),
+        )
+        await self.db.commit()
+
+    async def mark_metadata_unavailable(self, item: MediaItem, reason: str) -> None:
+        await self.db.execute(
+            "UPDATE media SET enriched_status='unsupported_metadata', enriched_sha256=NULL, last_error=? "
+            "WHERE channel_id=? AND media_key=?",
+            (reason, item.channel_id, item.key),
         )
         await self.db.commit()

@@ -36,6 +36,10 @@ def utc_date(value: str) -> date:
         raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from None
 
 
+def utc_end_date(value: str) -> date | str:
+    return "now" if value.lower() == "now" else utc_date(value)
+
+
 def parser() -> argparse.ArgumentParser:
     command_line = argparse.ArgumentParser(prog="python -m app")
     commands = command_line.add_subparsers(dest="command", required=True)
@@ -43,7 +47,7 @@ def parser() -> argparse.ArgumentParser:
     download.add_argument("channel", help="Public channel username, such as @channel")
     download.add_argument("--limit", type=positive_integer)
     download.add_argument("--from-date", type=utc_date)
-    download.add_argument("--to-date", type=utc_date)
+    download.add_argument("--to-date", type=utc_end_date)
     download.add_argument("--output", type=Path, default=Path("downloads"))
     return command_line
 
@@ -51,9 +55,9 @@ def parser() -> argparse.ArgumentParser:
 def validate(arguments: argparse.Namespace, command_line: argparse.ArgumentParser) -> None:
     if not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{4,31}", arguments.channel):
         command_line.error("channel must be a public @username")
-    if arguments.limit is not None and (arguments.from_date or arguments.to_date):
+    if arguments.limit is not None and (arguments.from_date is not None or arguments.to_date is not None):
         command_line.error("--limit cannot be combined with date options")
-    if arguments.from_date and arguments.to_date and arguments.from_date > arguments.to_date:
+    if arguments.from_date and isinstance(arguments.to_date, date) and arguments.from_date > arguments.to_date:
         command_line.error("--from-date must not be after --to-date")
 
 
@@ -73,11 +77,11 @@ def print_summary(summary: Summary, output: Path, log_path: Path) -> None:
 
 async def run(arguments: argparse.Namespace) -> int:
     config = load_config(arguments.output)
-    logger, log_path, redactor = configure_logging(config.output, (config.api_hash,))
+    logger, log_path, redactor = configure_logging(config.output, (str(config.api_id), config.api_hash))
     from_date = (datetime.combine(arguments.from_date, time.min, timezone.utc)
                  if arguments.from_date else None)
     to_date = (datetime.combine(arguments.to_date, time.max, timezone.utc)
-               if arguments.to_date else None)
+               if isinstance(arguments.to_date, date) else None)
     try:
         async with Database(config.output / "state.sqlite3") as database:
             known = await database.known_channel(arguments.channel[1:])

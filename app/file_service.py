@@ -79,10 +79,16 @@ def file_name(message: types.Message, kind: str) -> tuple[str, str | None]:
     return f"{stamp}_msg-{message.id}_{kind}{suffix}", None
 
 
+def enriched_for_original(path: Path) -> Path:
+    base = path.parent.parent if path.parent.name == "original" else path.parent
+    return base / "enriched" / path.name
+
+
 def unique_path(folder: Path, name: str, message_id: int | None) -> Path:
     def occupied(path: Path) -> bool:
-        enriched = path.parent.parent / "enriched" / path.name
-        return (path.exists() or part_path(path).exists() or enriched.exists() or part_path(enriched).exists())
+        enriched = enriched_for_original(path)
+        return (path.exists() or path.is_symlink() or part_path(path).exists()
+                or enriched.exists() or enriched.is_symlink() or part_path(enriched).exists())
 
     candidate = folder / name
     if not occupied(candidate):
@@ -100,7 +106,7 @@ def unique_path(folder: Path, name: str, message_id: int | None) -> Path:
 def make_item(channel: Channel, message: types.Message, kind: str, output: Path,
               anchor_id: int, anchor_date: str) -> MediaItem:
     name, source_name = file_name(message, kind)
-    original_dir = output / channel.folder / "posts" / f"{anchor_date}_{anchor_id}" / "original"
+    original_dir = output / channel.folder / "posts" / f"{anchor_date}_{anchor_id}"
     original_path = unique_path(original_dir, name, message.id)
     file_id = str(message.photo.id if message.photo else message.document.id)
     expected_size = (photo_download_spec(message.photo)[1] if message.photo
@@ -113,25 +119,25 @@ def make_item(channel: Channel, message: types.Message, kind: str, output: Path,
         expected_size=expected_size,
         publication_date=message.date, download_date=utc_now(),
         post_url=f"{channel.url}/{message.id}", original_path=original_path,
-        enriched_path=original_path.parent.parent / "enriched" / original_path.name,
+        enriched_path=enriched_for_original(original_path),
     )
 
 
 def make_profile_item(channel: Channel, output: Path) -> MediaItem:
     now = utc_now()
     name = f"channel-{channel.id}_{now:%Y-%m-%d}_photo-{channel.photo_id}.jpg"
-    original_path = output / channel.folder / "profile" / "original" / name
+    original_path = output / channel.folder / "profile" / name
     return MediaItem(
         key=f"profile:{channel.photo_id}", channel_id=channel.id, message_id=None,
         group_id=None, file_id=str(channel.photo_id), kind="profile", source_name=None,
         mime_type="image/jpeg", expected_size=None, publication_date=None,
         download_date=now, post_url=channel.url, original_path=original_path,
-        enriched_path=original_path.parent.parent / "enriched" / name,
+        enriched_path=enriched_for_original(original_path),
     )
 
 
 def valid_file(path: Path, expected_size: int | None, digest: str | None) -> bool:
-    return bool(digest and path.is_file() and
+    return bool(digest and path.is_file() and not path.is_symlink() and
                 (expected_size is None or path.stat().st_size == expected_size) and
                 sha256_file(path) == digest)
 
@@ -144,6 +150,13 @@ def remove_file(path: Path) -> None:
     try:
         path.unlink()
     except FileNotFoundError:
+        pass
+
+
+def remove_empty_directory(path: Path) -> None:
+    try:
+        path.rmdir()
+    except OSError:
         pass
 
 

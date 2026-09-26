@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import getpass
 import logging
+import os
 import random
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from typing import TypeVar
 
 from telethon import TelegramClient, errors
-from telethon.sessions import MemorySession
+from telethon.sessions import SQLiteSession
 from telethon.tl import types
 
 from .config import Config
@@ -22,8 +24,14 @@ T = TypeVar("T")
 
 class TelegramService:
     def __init__(self, config: Config, logger: logging.Logger, redactor: SecretFilter) -> None:
+        session_path = Path.cwd() / ".telegram.session"
+        if session_path.is_symlink():
+            raise AuthenticationError("Telegram session path must not be a symbolic link.")
+        descriptor = os.open(session_path, os.O_WRONLY | os.O_CREAT, 0o600)
+        os.close(descriptor)
+        session_path.chmod(0o600)
         self.client = TelegramClient(
-            MemorySession(), config.api_id, config.api_hash,
+            SQLiteSession(str(session_path)), config.api_id, config.api_hash,
             flood_sleep_threshold=0, request_retries=0, connection_retries=2,
         )
         self.logger = logger
