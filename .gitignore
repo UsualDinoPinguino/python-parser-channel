@@ -1,0 +1,4 @@
+downloads/
+.env
+.idea/
+app/__pycache__/*
