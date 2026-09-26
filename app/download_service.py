@@ -66,8 +66,9 @@ class DownloadService:
             await self.database.upsert_message(channel.id, message.id, group_id, iso_utc(message.date), post_url)
             item = make_item(channel, message, kind, self.config.output, anchor_id, date_utc)
             await self._process(item, message, summary)
-        self.logger.info("Run finished: channel=%s posts=%d downloaded=%d enriched=%d skipped=%d failed=%d",
+        self.logger.info("Run finished: channel=%s posts=%d downloaded=%d bytes=%d enriched=%d skipped=%d failed=%d",
                          channel.username, summary.processed_posts, summary.downloaded_originals,
+                         summary.downloaded_bytes,
                          summary.created_enriched_copies, summary.skipped_valid_files, summary.failed_files)
         return summary
 
@@ -102,8 +103,9 @@ class DownloadService:
                 await self.database.set_state(item, original=Status.CORRUPTED, enriched=Status.CORRUPTED)
                 self.logger.warning("Corrupted or missing original: %s", item.key)
             try:
-                await self._download_original(item, source, row, summary)
+                size = await self._download_original(item, source, row, summary)
                 summary.downloaded_originals += 1
+                summary.downloaded_bytes += size
                 if had_damage:
                     summary.repaired_corrupted_files += 1
                 refreshed = await self.database.get_media(item.channel_id, item.key)
@@ -192,7 +194,7 @@ class DownloadService:
         return replace(item, original_path=candidate, enriched_path=enriched)
 
     async def _download_original(self, item: MediaItem, source: types.Message | types.Channel,
-                                 row: object, summary: Summary) -> None:
+                                 row: object, summary: Summary) -> int:
         item.original_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = part_path(item.original_path)
         offset = 0
@@ -259,6 +261,7 @@ class DownloadService:
             summary.resumed_downloads += 1
         await self.database.clear_error(item)
         self.logger.info("Original downloaded and verified: %s bytes=%d sha256=%s", item.key, size, digest)
+        return size
 
     async def _enrich(self, item: MediaItem, summary: Summary) -> None:
         temporary: Path | None = None

@@ -14,7 +14,7 @@ from .logging_config import configure_logging
 from .metadata_service import MetadataService
 from .models import AppError, ConfigurationError, Summary
 from .telegram_service import TelegramService
-from .utils import iso_utc, utc_now
+from .utils import format_size, iso_utc, utc_now
 
 
 def positive_integer(value: str) -> int:
@@ -65,6 +65,7 @@ def print_summary(summary: Summary, output: Path, log_path: Path) -> None:
     print(f"Channel: {summary.channel}")
     print(f"Processed posts: {summary.processed_posts}")
     print(f"Downloaded originals: {summary.downloaded_originals}")
+    print(f"Downloaded data: {format_size(summary.downloaded_bytes)}")
     print(f"Created enriched copies: {summary.created_enriched_copies}")
     print(f"Skipped valid files: {summary.skipped_valid_files}")
     print(f"Resumed downloads: {summary.resumed_downloads}")

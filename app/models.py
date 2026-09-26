@@ -81,6 +81,7 @@ class Summary:
     channel: str
     processed_posts: int = 0
     downloaded_originals: int = 0
+    downloaded_bytes: int = 0
     created_enriched_copies: int = 0
     skipped_valid_files: int = 0
     resumed_downloads: int = 0
