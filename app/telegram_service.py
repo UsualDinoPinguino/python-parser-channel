@@ -64,9 +64,9 @@ class TelegramService:
             try:
                 await self.retry(lambda: self.client.sign_in(phone=phone, code=code, phone_code_hash=sent.phone_code_hash), "sign in")
             except errors.SessionPasswordNeededError:
-                password = getpass.getpass("2FA password: ")
+                password = getpass.getpass("Password: ")
                 self.redactor.add_secret(password)
-                await self.retry(lambda: self.client.sign_in(password=password), "2FA sign in")
+                await self.retry(lambda: self.client.sign_in(password=password), "sign in")
             if not await self.client.is_user_authorized():
                 raise AuthenticationError("Telegram authorization did not complete.")
         except (EOFError, KeyboardInterrupt):

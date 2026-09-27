@@ -39,7 +39,7 @@ Run the application from the repository root. The local `.env` and `.telegram.se
 Run a command such as:
 
 ```bash
-python -m app download @nakedboots --limit 1
+python -m app download @channel --limit 1
 ```
 
 If `TELEGRAM_API_ID` or `TELEGRAM_API_HASH` is missing, the program asks for it in the terminal and saves the entered value in a local `.env` file. The API ID must be a positive integer, and the API hash must be a 32-character hexadecimal string. Run the first command in an interactive terminal if you want to use these prompts.
@@ -70,7 +70,7 @@ python -m app download @channel
 python -m app download @channel --limit 100
 
 # Process posts within an inclusive UTC date range.
-python -m app download @chudo_photo --from-date 2023-01-11 --to-date 2023-02-17
+python -m app download @channel --from-date 2023-01-11 --to-date 2023-02-17
 
 # Process posts from a date through the latest available post.
 python -m app download @channel --from-date 2026-01-01 --to-date now
