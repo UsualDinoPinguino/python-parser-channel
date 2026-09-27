@@ -86,8 +86,10 @@ class MetadataService:
         }
         if item.publication_date is not None:
             expected["XMP-xmp:CreateDate"] = iso_utc(item.publication_date)
-        arguments = ["exiftool", "-overwrite_original", "-P"]
+        arguments = ["exiftool", "-m", "-overwrite_original", "-P"]
         arguments.extend(f"-{key}={value}" for key, value in expected.items())
+        if "XMP-x:XMPToolkit" in before:
+            arguments.append(f"-XMP-x:XMPToolkit={before['XMP-x:XMPToolkit']}")
         arguments.append(str(temporary))
         await run_command(*arguments)
         data = await self._image_tags(temporary)
@@ -95,8 +97,10 @@ class MetadataService:
             actual = data.get(key)
             if actual is None or ("Date" in key and not same_utc(str(actual), value)) or ("Date" not in key and actual != value):
                 raise MetadataError("Written image metadata did not pass verification.")
+        structural_tags = {"XMP-xmpNote:HasExtendedXMP"}
         for key, value in before.items():
-            if key.startswith(("EXIF:", "XMP-", "IPTC:")) and key not in expected and data.get(key) != value:
+            if (key.startswith(("EXIF:", "XMP-", "IPTC:")) and key not in expected
+                    and key not in structural_tags and data.get(key) != value):
                 raise UnsupportedMetadata("Image writer changed existing metadata.")
 
     async def _image_tags(self, path: Path) -> dict[str, object]:

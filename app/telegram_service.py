@@ -98,11 +98,20 @@ class TelegramService:
             entity = await self._resolve_known_channel(known)
         if known is not None and isinstance(entity, types.Channel) and entity.id != int(known["id"]):
             entity = await self._resolve_known_channel(known)
-        if not isinstance(entity, types.Channel) or not entity.broadcast or not entity.username or entity.access_hash is None:
+        if not isinstance(entity, types.Channel) or not entity.broadcast or entity.access_hash is None:
+            raise ChannelError("The target must be an accessible public broadcast channel.")
+        public_username = self._public_username(entity, username)
+        if public_username is None:
             raise ChannelError("The target must be an accessible public broadcast channel.")
         photo_id = getattr(entity.photo, "photo_id", None)
-        channel = Channel(entity.id, entity.username, safe_name(entity.username), photo_id, entity.access_hash)
+        channel = Channel(entity.id, public_username, safe_name(public_username), photo_id, entity.access_hash)
         return channel, entity
+
+    @staticmethod
+    def _public_username(entity: types.Channel, requested: str) -> str | None:
+        names = [entity.username] if entity.username else []
+        names.extend(entry.username for entry in entity.usernames or [] if entry.active and entry.username)
+        return next((name for name in names if name.casefold() == requested.casefold()), names[0] if names else None)
 
     async def _resolve_known_channel(self, known: object) -> types.Channel:
         try:

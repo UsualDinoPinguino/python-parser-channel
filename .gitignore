@@ -3,4 +3,5 @@ downloads/
 .env.tmp-*
 .telegram.session*
 .idea/
+.venv/
 app/__pycache__/*
