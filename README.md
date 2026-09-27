@@ -27,7 +27,7 @@ Ensure that Python 3.12 or newer is installed before continuing. The commands be
 ```bash
 git clone https://github.com/UsualDinoPinguino/python-parser-channel.git
 cd python-parser-channel
-python3.12 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
